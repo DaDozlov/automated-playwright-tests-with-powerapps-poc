@@ -1,7 +1,12 @@
 # Instructions: build Playwright end-to-end tests for a Power App
 
 These instructions are for an AI coding agent (Claude Code, Codex, Copilot, Cursor, ...).
-Start it in this folder and tell it: **"Follow INSTRUCTIONS.md for my Power App."**
+Start it in this folder and tell it which app, with the app's web link. You can also paste the link into
+the prompt below once, and then just say "Follow INSTRUCTIONS.md for my Power App":
+
+> Follow INSTRUCTIONS.md for my Power App: https://apps.powerapps.com/play/e/<environment-id>/a/<app-id>?tenantId=<tenant-id>
+
+(Web link: make.powerapps.com → Apps → ⋯ next to the app → Details → Web link.)
 
 The result is a repo that exports the published canvas app, describes it as user stories,
 and tests every acceptance criterion in a real browser, checked against the app's data source.
@@ -23,24 +28,41 @@ and tests every acceptance criterion in a real browser, checked against the app'
 
 ## Inputs
 
-Find these with the CLI where possible. Ask the user for the rest:
+The only required input is the app's **web link**. Take it from the user's prompt or, if the prompt has none,
+from the example prompt at the top of this file (if it's a real link, not a placeholder). If there is neither,
+ask for it before doing anything else. Everything else comes from it:
 
-| Input | How to find it |
+| Input | Where it comes from |
 |---|---|
-| Environment | `pac env list` after signing in, or ask the user |
-| Solution that contains the app | `pac solution list`. If the app isn't in a solution, ask the user to add it to one. |
-| App play URL | make.powerapps.com → Apps → ⋯ → Details → Web link. Keep `tenantId`, drop `hint` and `sourcetime`, add `&hidenavbar=true`. |
-| Data source | from the export (phase 1). If it isn't a SharePoint list, see "Other data sources". |
+| App play URL (`APP_URL`) | the web link. Keep `tenantId`, drop `hint` and `sourcetime`, add `&hidenavbar=true`. |
+| Environment ID | the web link: `/play/e/<environment-id>/a/<app-id>` |
+| App ID | the web link, same path |
+| Tenant ID | the web link: `tenantId=<tenant-id>` |
+| Solution that contains the app | `pac solution list` (phase 1). Show the user the unmanaged solutions and ask which one contains the app. If none does, ask the user to add the app to one. |
+| Data source (`SP_SITE_URL`, `SP_LIST_TITLE`) | the export (phase 1). If it isn't a SharePoint list, see "Other data sources". |
+
+Write the values you have into `.env` as soon as phase 3 creates it.
 
 ---
 
 ## Phase 1: Export the published app
 
-1. Check that the Power Platform CLI is installed: `pac` on PATH, or `%LOCALAPPDATA%\Microsoft\PowerAppsCLI\pac.cmd`.
-   If it's missing, ask the user to run `winget install Microsoft.PowerAppsCLI`.
-2. If `pac auth list` shows no profile for the environment, run `pac auth create --environment <env>`
-   and ask the user to sign in in the window that opens.
-3. Write `scripts/export-solution.ps1` (parameter `-SolutionName`) that:
+1. Check the tools and install what's missing. Tell the user what you're about to install and wait for an OK first:
+   - Node.js 20 or later (`node -v`). Missing or older: `winget install OpenJS.NodeJS.LTS`
+     (macOS: `brew install node`, Linux: the distribution's package manager)
+   - Power Platform CLI: `pac` on PATH, or `%LOCALAPPDATA%\Microsoft\PowerAppsCLI\pac.cmd`.
+     Missing: `winget install Microsoft.PowerAppsCLI`
+     (macOS / Linux: `dotnet tool install --global Microsoft.PowerApps.CLI.Tool`)
+   - Git (`git --version`). Missing: `winget install Git.Git`
+
+   A new install may not be on PATH in the running shell. Use its full path, or ask the user to restart the agent.
+   If an install fails (no admin rights, blocked by policy), tell the user exactly what to install and stop.
+   Playwright and its browser are installed later, in phase 3.
+2. If `pac auth list` shows no profile for the environment from the web link, run
+   `pac auth create --environment <environment-id>` and ask the user to sign in in the window that opens.
+   Then run `pac org who` and check that it shows that environment.
+3. Find the solution (see "Inputs").
+4. Write `scripts/export-solution.ps1` (parameter `-SolutionName`) that:
    - finds `pac` on PATH or in the default install folder
    - runs `pac solution export --name <solution> --path out/<solution>.zip --overwrite`
    - runs `pac solution unpack --zipfile out/<solution>.zip --folder src/solution --packagetype Unmanaged --allowDelete --allowWrite`,
@@ -48,15 +70,15 @@ Find these with the CLI where possible. Ask the user for the rest:
    - copies every `src/solution/CanvasApps/*.msapp` to a `.zip`, expands it into `out/<name>/`, and copies
      its `Src/*` to `src/canvas/<name without _DocumentUri>/`, excluding `_EditorState.pa.yaml`
      (Studio view state only)
-4. Run it. Then read every `src/canvas/<app>/*.pa.yaml` and write down:
+5. Run it. Then read every `src/canvas/<app>/*.pa.yaml` and write down:
    - screens, and how the user moves between them (`Navigate`)
    - every control: name, type, text, hint text, default value
    - every rule: `DisplayMode`, `Visible`, validation formulas (`IsBlank`, `IsMatch`, `Trim`, ...)
    - what each button's `OnSelect` does: `Patch` / `SubmitForm` / `Remove`, which columns, which variables
    - messages the user can see: labels, `Notify` texts
-5. Find the data source: the name used in `Patch(...)` and its details in `out/<app>/References/`
+6. Find the data source: the name used in `Patch(...)` and its details in `out/<app>/References/`
    (for example `DataSources.json`). For SharePoint, note the site URL, list title and column names.
-6. Open the live app once (Playwright or the user's browser) and check that controls carry
+7. Open the live app once (Playwright or the user's browser) and check that controls carry
    `data-control-name="<control name>"` inside the iframe `iframe[name="fullscreen-app-host"]`.
 
 Summarise the app for the user and point out controls with default names (`TextInput1`, ...).
